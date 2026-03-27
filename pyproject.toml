@@ -1,0 +1,21 @@
+[project]
+name = "copilotstudio-client-py"
+version = "0.1.0"
+description = "Python client for chatting with Copilot Studio agents and running prompt evaluations"
+requires-python = ">=3.10"
+dependencies = [
+    "microsoft-agents-copilotstudio-client>=0.8.0",
+    "msal>=1.28.0",
+    "python-dotenv>=1.0.0",
+    "aiohttp>=3.9.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+]
+
+[project.scripts]
+chat = "chat:main"
+evaluate = "evaluate:main"

@@ -1,0 +1,4 @@
+prompt,expected_response,match_method
+"Hi","hello",contains
+"how much does company cover for dental costs","80%",contains
+"what is the parental leave policy","16 weeks",contains
