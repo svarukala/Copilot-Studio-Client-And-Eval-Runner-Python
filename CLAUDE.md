@@ -44,14 +44,18 @@ All settings in `.env`:
 ## Evaluation CSV Format
 
 ```csv
-prompt,expected_response,match_method
-"Hello","hi",contains
-"What is 2+2?","4",exact
-"Tell me about X","topic|subject",regex
-"Reset my password","credit card",not_contains
-"Describe benefits","health insurance",fuzzy
-"Explain leave policy","parental leave|80",partial
+prompt,expected_response,match_method,conversation_id
+"Hello","hi",contains,
+"What is 2+2?","4",exact,
+"Tell me about X","topic|subject",regex,
+"Reset my password","credit card",not_contains,
+"Describe benefits","health insurance",fuzzy,
+"Explain leave policy","parental leave|80",partial,
+"Hi","hello",contains,benefits_flow
+"Tell me about dental","80%",contains,benefits_flow
 ```
+
+Each row runs in a **fresh conversation** by default. To test multi-turn flows, give rows the same `conversation_id` — they'll share one conversation and run in CSV order.
 
 Match methods: `exact`, `contains`, `not_contains`, `regex`, `fuzzy`, `partial`
 

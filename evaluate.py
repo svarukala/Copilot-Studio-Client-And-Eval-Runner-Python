@@ -1,8 +1,20 @@
 """Run prompt evaluations against a Copilot Studio agent from a CSV file.
 
 CSV format:
-    prompt,expected_response,match_method
+    prompt,expected_response,match_method[,conversation_id]
     "What is your name?","Help Desk","contains"
+
+Each row gets a fresh conversation by default. To run multiple prompts in the
+same conversation (multi-turn), give them the same ``conversation_id``:
+
+    prompt,expected_response,match_method,conversation_id
+    "Hi","hello",contains,greeting_flow
+    "What are your hours?","9am",contains,greeting_flow
+    "Reset my password","done",contains
+
+Rows without a conversation_id (or with an empty value) each start their own
+conversation. Rows sharing the same conversation_id are sent sequentially
+within one conversation, in CSV order.
 
 Match methods:
     exact        - response must equal expected (case-insensitive)
@@ -18,6 +30,8 @@ import csv
 import difflib
 import re
 import sys
+import uuid
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -34,6 +48,7 @@ class EvalCase:
     prompt: str
     expected_response: str
     match_method: str  # exact, contains, regex, not_contains
+    conversation_id: str = ""  # rows with same id share a conversation
 
     def _parse_threshold(self) -> tuple[str, float]:
         """Parse 'expected|threshold' format. Returns (expected_text, threshold_pct)."""
@@ -148,8 +163,22 @@ def load_cases(csv_path: str) -> list[EvalCase]:
                 prompt=row["prompt"],
                 expected_response=row["expected_response"],
                 match_method=row.get("match_method", "contains"),
+                conversation_id=row.get("conversation_id", "").strip(),
             ))
     return cases
+
+
+def group_cases_by_conversation(cases: list[EvalCase]) -> OrderedDict[str, list[EvalCase]]:
+    """Group cases by conversation_id, preserving CSV order.
+
+    Cases without a conversation_id each get a unique key so they run in
+    their own fresh conversation.
+    """
+    groups: OrderedDict[str, list[EvalCase]] = OrderedDict()
+    for case in cases:
+        key = case.conversation_id if case.conversation_id else f"_solo_{uuid.uuid4().hex}"
+        groups.setdefault(key, []).append(case)
+    return groups
 
 
 async def collect_response(client: CopilotClient, question: str) -> str:
@@ -163,6 +192,16 @@ async def collect_response(client: CopilotClient, question: str) -> str:
     return "\n".join(parts)
 
 
+async def start_new_conversation(conn: ConnectionSettings, token: str, conv_label: str) -> CopilotClient:
+    """Create a new CopilotClient and consume the greeting."""
+    client = CopilotClient(conn, token)
+    print(f"\n--- Starting conversation{f' [{conv_label}]' if conv_label else ''} ---")
+    async for activity in client.start_conversation(emit_start_conversation_event=True):
+        if activity.type == ActivityTypes.message and activity.text:
+            print(f"  Agent greeting: {activity.text[:100]}")
+    return client
+
+
 async def run_evaluation(csv_path: str, output_path: str | None = None) -> EvalReport:
     settings = AgentSettings.from_env()
     conn = ConnectionSettings(
@@ -170,31 +209,35 @@ async def run_evaluation(csv_path: str, output_path: str | None = None) -> EvalR
         agent_identifier=settings.schema_name,
     )
     token = acquire_token(settings)
-    client = CopilotClient(conn, token)
-
-    # Start conversation
-    print("Starting conversation with agent...")
-    async for activity in client.start_conversation(emit_start_conversation_event=True):
-        if activity.type == ActivityTypes.message and activity.text:
-            print(f"  Agent greeting: {activity.text[:100]}")
 
     cases = load_cases(csv_path)
-    print(f"Loaded {len(cases)} evaluation cases from {csv_path}\n")
+    groups = group_cases_by_conversation(cases)
+    total = len(cases)
+    multi_turn_groups = sum(1 for g in groups.values() if len(g) > 1)
+    solo_count = sum(1 for g in groups.values() if len(g) == 1)
+    print(f"Loaded {total} evaluation cases from {csv_path}")
+    print(f"  {solo_count} independent prompt(s), {multi_turn_groups} multi-turn conversation(s)\n")
 
     report = EvalReport()
-    for i, case in enumerate(cases, 1):
-        print(f"[{i}/{len(cases)}] Sending: {case.prompt[:80]}...", flush=True)
-        try:
-            actual = await collect_response(client, case.prompt)
-            passed = case.check(actual)
-            report.results.append(EvalResult(case=case, actual_response=actual, passed=passed))
-            status = "PASS" if passed else "FAIL"
-            print(f"  -> [{status}]")
-        except Exception as e:
-            report.results.append(EvalResult(
-                case=case, actual_response="", passed=False, error=str(e)
-            ))
-            print(f"  -> [ERROR] {e}")
+    case_num = 0
+    for conv_id, group in groups.items():
+        label = conv_id if not conv_id.startswith("_solo_") else ""
+        client = await start_new_conversation(conn, token, label)
+
+        for case in group:
+            case_num += 1
+            print(f"[{case_num}/{total}] Sending: {case.prompt[:80]}...", flush=True)
+            try:
+                actual = await collect_response(client, case.prompt)
+                passed = case.check(actual)
+                report.results.append(EvalResult(case=case, actual_response=actual, passed=passed))
+                status = "PASS" if passed else "FAIL"
+                print(f"  -> [{status}]")
+            except Exception as e:
+                report.results.append(EvalResult(
+                    case=case, actual_response="", passed=False, error=str(e)
+                ))
+                print(f"  -> [ERROR] {e}")
 
     report.print_summary()
 
@@ -209,8 +252,10 @@ async def run_evaluation(csv_path: str, output_path: str | None = None) -> EvalR
 def main():
     if len(sys.argv) < 2:
         print("Usage: python evaluate.py <input.csv> [output.csv]")
-        print("\nCSV columns: prompt, expected_response, match_method")
+        print("\nCSV columns: prompt, expected_response, match_method[, conversation_id]")
         print("Match methods: exact, contains, not_contains, regex, fuzzy, partial")
+        print("\nRows with the same conversation_id share one conversation (multi-turn).")
+        print("Rows without a conversation_id each get a fresh conversation.")
         sys.exit(1)
 
     csv_path = sys.argv[1]
