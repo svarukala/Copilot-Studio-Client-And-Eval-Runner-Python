@@ -56,17 +56,34 @@ python evaluate.py input.csv results/output.csv     # explicit output path
 
 ## Evaluation CSV Format
 
-Create a CSV with three columns:
+Create a CSV with these columns (`conversation_id` and `attachment` are optional):
 
 ```csv
-prompt,expected_response,match_method
-"Hello","hello",contains
-"What is 2+2?","4",exact
-"Tell me about policies","policy|procedure",regex
-"Reset my password","credit card",not_contains
-"Describe our benefits","health insurance",fuzzy
-"Explain the leave policy","parental leave|80",partial
+prompt,expected_response,match_method,conversation_id,attachment
+"Hello","hello",contains,,
+"What is 2+2?","4",exact,,
+"Tell me about policies","policy|procedure",regex,,
+"Reset my password","credit card",not_contains,,
+"Describe our benefits","health insurance",fuzzy,,
+"Explain the leave policy","parental leave|80",partial,,
+"Hi","hello",contains,benefits_flow,
+"Tell me about dental","80%",contains,benefits_flow,
+"Summarize this","key points",contains,,report.pdf
+"Describe image","chart",contains,,https://example.com/chart.png
 ```
+
+### Conversation Isolation
+
+Each row runs in a **fresh conversation** by default, so earlier answers don't influence later prompts. To test multi-turn flows, give rows the same `conversation_id` — they'll share one conversation and execute in CSV order.
+
+### File Attachments
+
+The optional `attachment` column lets you send a file alongside the prompt:
+
+- **URL** (`https://...`) — sent as-is via `content_url` on the attachment
+- **Local file path** (`report.pdf`) — the file is base64-encoded into a data URI and sent inline
+
+Under the hood, prompts with attachments use `ask_question_with_activity()` to send a full `Activity` object with an `attachments` list, while text-only prompts use the simpler `ask_question()`.
 
 ### Match Methods
 
@@ -115,7 +132,8 @@ COPILOTSTUDIO_APP_CLIENT_SECRET=your-secret
 - Package: [`microsoft-agents-copilotstudio-client`](https://pypi.org/project/microsoft-agents-copilotstudio-client/) (import path uses underscores: `microsoft_agents.copilotstudio.client`)
 - `CopilotClient` takes `ConnectionSettings` + an access token string. Uses SSE streaming internally.
 - `start_conversation()` returns an async generator of activities (agent greeting)
-- `ask_question()` returns an async generator per question
+- `ask_question()` returns an async generator per question (text only)
+- `ask_question_with_activity()` accepts a full `Activity` object (used for attachments)
 - Activity types: `message`, `typing`, `event`, `end_of_conversation` (from `microsoft_agents.activity.ActivityTypes`)
 - Auth scope: `https://api.powerplatform.com/.default`
 
