@@ -1,20 +1,26 @@
 """Run prompt evaluations against a Copilot Studio agent from a CSV file.
 
 CSV format:
-    prompt,expected_response,match_method[,conversation_id]
+    prompt,expected_response,match_method[,conversation_id][,attachment]
     "What is your name?","Help Desk","contains"
 
 Each row gets a fresh conversation by default. To run multiple prompts in the
 same conversation (multi-turn), give them the same ``conversation_id``:
 
-    prompt,expected_response,match_method,conversation_id
-    "Hi","hello",contains,greeting_flow
-    "What are your hours?","9am",contains,greeting_flow
-    "Reset my password","done",contains
+    prompt,expected_response,match_method,conversation_id,attachment
+    "Hi","hello",contains,greeting_flow,
+    "What are your hours?","9am",contains,greeting_flow,
+    "Reset my password","done",contains,,
+    "Analyze this","summary",contains,,report.pdf
+    "Describe image","cat",contains,,https://example.com/photo.png
 
 Rows without a conversation_id (or with an empty value) each start their own
 conversation. Rows sharing the same conversation_id are sent sequentially
 within one conversation, in CSV order.
+
+The optional ``attachment`` column accepts:
+  - A URL (http/https) — sent as-is via ``content_url``
+  - A local file path — base64-encoded into a data URI
 
 Match methods:
     exact        - response must equal expected (case-insensitive)
@@ -26,8 +32,10 @@ Match methods:
 """
 
 import asyncio
+import base64
 import csv
 import difflib
+import mimetypes
 import re
 import sys
 import uuid
@@ -36,7 +44,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from microsoft_agents.activity import ActivityTypes
+from microsoft_agents.activity import Activity, Attachment, ActivityTypes
 from microsoft_agents.copilotstudio.client import ConnectionSettings, CopilotClient
 
 from config import AgentSettings
@@ -49,6 +57,7 @@ class EvalCase:
     expected_response: str
     match_method: str  # exact, contains, regex, not_contains
     conversation_id: str = ""  # rows with same id share a conversation
+    attachment: str = ""  # URL or local file path
 
     def _parse_threshold(self) -> tuple[str, float]:
         """Parse 'expected|threshold' format. Returns (expected_text, threshold_pct)."""
@@ -164,6 +173,7 @@ def load_cases(csv_path: str) -> list[EvalCase]:
                 expected_response=row["expected_response"],
                 match_method=row.get("match_method", "contains"),
                 conversation_id=row.get("conversation_id", "").strip(),
+                attachment=row.get("attachment", "").strip(),
             ))
     return cases
 
@@ -181,10 +191,42 @@ def group_cases_by_conversation(cases: list[EvalCase]) -> OrderedDict[str, list[
     return groups
 
 
-async def collect_response(client: CopilotClient, question: str) -> str:
-    """Send a question and collect the full text response."""
+def build_attachment(raw: str) -> Attachment:
+    """Build an Attachment from a URL or local file path.
+
+    URLs (http/https) are sent as content_url.  Local files are base64-encoded
+    into a ``data:`` URI so they travel inline over the JSON transport.
+    """
+    if raw.startswith(("http://", "https://")):
+        content_type = mimetypes.guess_type(raw)[0] or "application/octet-stream"
+        name = raw.rsplit("/", 1)[-1].split("?")[0] or "attachment"
+        return Attachment(content_type=content_type, content_url=raw, name=name)
+
+    path = Path(raw)
+    if not path.is_file():
+        raise FileNotFoundError(f"Attachment file not found: {raw}")
+    content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
+    b64 = base64.b64encode(path.read_bytes()).decode("ascii")
+    data_uri = f"data:{content_type};base64,{b64}"
+    return Attachment(content_type=content_type, content_url=data_uri, name=path.name)
+
+
+async def collect_response(client: CopilotClient, case: EvalCase) -> str:
+    """Send a prompt (with optional attachment) and collect the full text response."""
+    if case.attachment:
+        attachment = build_attachment(case.attachment)
+        activity = Activity(
+            type="message",
+            text=case.prompt,
+            attachments=[attachment],
+        )
+        print(f"  [attachment: {attachment.name}]")
+        response_gen = client.ask_question_with_activity(activity)
+    else:
+        response_gen = client.ask_question(case.prompt)
+
     parts: list[str] = []
-    async for activity in client.ask_question(question):
+    async for activity in response_gen:
         if activity.type == ActivityTypes.message and activity.text:
             parts.append(activity.text)
         elif activity.type == ActivityTypes.end_of_conversation:
@@ -228,7 +270,7 @@ async def run_evaluation(csv_path: str, output_path: str | None = None) -> EvalR
             case_num += 1
             print(f"[{case_num}/{total}] Sending: {case.prompt[:80]}...", flush=True)
             try:
-                actual = await collect_response(client, case.prompt)
+                actual = await collect_response(client, case)
                 passed = case.check(actual)
                 report.results.append(EvalResult(case=case, actual_response=actual, passed=passed))
                 status = "PASS" if passed else "FAIL"
@@ -252,10 +294,11 @@ async def run_evaluation(csv_path: str, output_path: str | None = None) -> EvalR
 def main():
     if len(sys.argv) < 2:
         print("Usage: python evaluate.py <input.csv> [output.csv]")
-        print("\nCSV columns: prompt, expected_response, match_method[, conversation_id]")
+        print("\nCSV columns: prompt, expected_response, match_method[, conversation_id][, attachment]")
         print("Match methods: exact, contains, not_contains, regex, fuzzy, partial")
         print("\nRows with the same conversation_id share one conversation (multi-turn).")
         print("Rows without a conversation_id each get a fresh conversation.")
+        print("Attachment: URL or local file path (optional). Local files are base64-encoded.")
         sys.exit(1)
 
     csv_path = sys.argv[1]

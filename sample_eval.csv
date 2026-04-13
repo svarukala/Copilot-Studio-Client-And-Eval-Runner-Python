@@ -1,6 +1,7 @@
-prompt,expected_response,match_method,conversation_id
-"Hi","hello",contains,
-"how much does company cover for dental costs","80%",contains,
-"what is the parental leave policy","16 weeks",contains,
-"Hi","hello",contains,benefits_flow
-"Tell me about dental coverage","80%",contains,benefits_flow
+prompt,expected_response,match_method,conversation_id,attachment
+"Hi","hello",contains,,
+"how much does company cover for dental costs","80%",contains,,
+"what is the parental leave policy","16 weeks",contains,,
+"Hi","hello",contains,benefits_flow,
+"Tell me about dental coverage","80%",contains,benefits_flow,
+"Summarize this document","summary",contains,,https://example.com/docs/benefits.pdf
