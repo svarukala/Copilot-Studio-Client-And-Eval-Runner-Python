@@ -13,6 +13,7 @@ class AgentSettings:
     app_client_id: str
     app_client_secret: str
     auth_mode: str  # "interactive" or "s2s"
+    timeout: int  # seconds per SDK call (ask_question / start_conversation)
 
     @classmethod
     def from_env(cls, env_path: str = ".env") -> "AgentSettings":
@@ -24,6 +25,7 @@ class AgentSettings:
             app_client_id=os.environ["COPILOTSTUDIO_APP_CLIENT_ID"],
             app_client_secret=os.environ.get("COPILOTSTUDIO_APP_CLIENT_SECRET", ""),
             auth_mode=os.environ.get("AUTH_MODE", "interactive"),
+            timeout=int(os.environ.get("TIMEOUT_SECONDS", "120")),
         )
 
     @property

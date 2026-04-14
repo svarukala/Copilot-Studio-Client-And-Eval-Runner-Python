@@ -226,7 +226,18 @@ def build_attachment(raw: str) -> Attachment:
     return Attachment(content_type=content_type, content_url=data_uri, name=path.name)
 
 
-async def collect_response(client: CopilotClient, case: EvalCase) -> str:
+async def _collect_activities(response_gen) -> str:
+    """Iterate an async activity generator and join message texts."""
+    parts: list[str] = []
+    async for activity in response_gen:
+        if activity.type == ActivityTypes.message and activity.text:
+            parts.append(activity.text)
+        elif activity.type == ActivityTypes.end_of_conversation:
+            break
+    return "\n".join(parts)
+
+
+async def collect_response(client: CopilotClient, case: EvalCase, timeout: int) -> str:
     """Send a prompt (with optional attachment) and collect the full text response."""
     if case.attachment:
         attachment = build_attachment(case.attachment)
@@ -241,22 +252,20 @@ async def collect_response(client: CopilotClient, case: EvalCase) -> str:
     else:
         response_gen = client.ask_question(case.prompt)
 
-    parts: list[str] = []
-    async for activity in response_gen:
-        if activity.type == ActivityTypes.message and activity.text:
-            parts.append(activity.text)
-        elif activity.type == ActivityTypes.end_of_conversation:
-            break
-    return "\n".join(parts)
+    return await asyncio.wait_for(_collect_activities(response_gen), timeout=timeout)
 
 
-async def start_new_conversation(conn: ConnectionSettings, token: str, conv_label: str) -> CopilotClient:
+async def start_new_conversation(conn: ConnectionSettings, token: str, conv_label: str, timeout: int) -> CopilotClient:
     """Create a new CopilotClient and consume the greeting."""
     client = CopilotClient(conn, token)
     print(f"\n--- Starting conversation{f' [{conv_label}]' if conv_label else ''} ---")
-    async for activity in client.start_conversation(emit_start_conversation_event=True):
-        if activity.type == ActivityTypes.message and activity.text:
-            print(f"  Agent greeting: {activity.text[:100]}")
+
+    async def _consume_greeting():
+        async for activity in client.start_conversation(emit_start_conversation_event=True):
+            if activity.type == ActivityTypes.message and activity.text:
+                print(f"  Agent greeting: {activity.text[:100]}")
+
+    await asyncio.wait_for(_consume_greeting(), timeout=timeout)
     return client
 
 
@@ -267,6 +276,7 @@ async def run_evaluation(csv_path: str, output_path: str | None = None) -> EvalR
         agent_identifier=settings.schema_name,
     )
     token = acquire_token(settings)
+    timeout = settings.timeout
 
     cases = load_cases(csv_path)
     groups = group_cases_by_conversation(cases)
@@ -274,23 +284,30 @@ async def run_evaluation(csv_path: str, output_path: str | None = None) -> EvalR
     multi_turn_groups = sum(1 for g in groups.values() if len(g) > 1)
     solo_count = sum(1 for g in groups.values() if len(g) == 1)
     print(f"Loaded {total} evaluation cases from {csv_path}")
-    print(f"  {solo_count} independent prompt(s), {multi_turn_groups} multi-turn conversation(s)\n")
+    print(f"  {solo_count} independent prompt(s), {multi_turn_groups} multi-turn conversation(s)")
+    print(f"  Timeout: {timeout}s per call\n")
 
     report = EvalReport()
     case_num = 0
     for conv_id, group in groups.items():
         label = conv_id if not conv_id.startswith("_solo_") else ""
-        client = await start_new_conversation(conn, token, label)
+        client = await start_new_conversation(conn, token, label, timeout)
 
         for case in group:
             case_num += 1
             print(f"[{case_num}/{total}] Sending: {case.prompt[:80]}...", flush=True)
             try:
-                actual = await collect_response(client, case)
+                actual = await collect_response(client, case, timeout)
                 passed = case.check(actual)
                 report.results.append(EvalResult(case=case, actual_response=actual, passed=passed))
                 status = "PASS" if passed else "FAIL"
                 print(f"  -> [{status}]")
+            except TimeoutError:
+                report.results.append(EvalResult(
+                    case=case, actual_response="", passed=False,
+                    error=f"Timed out after {timeout}s",
+                ))
+                print(f"  -> [TIMEOUT] No response within {timeout}s")
             except Exception as e:
                 report.results.append(EvalResult(
                     case=case, actual_response="", passed=False, error=str(e)

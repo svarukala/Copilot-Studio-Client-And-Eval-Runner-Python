@@ -8,7 +8,7 @@
 
 - [ ] **`partial` match is O(n*m)** — `evaluate.py:69-71` slides character-by-character over the response running `SequenceMatcher` at each offset. Fine at eval-runner scale but could be slow for long responses.
 
-- [ ] **No timeout/retry on SDK calls** — If the agent hangs or the SSE stream stalls, `ask_question()` blocks indefinitely. Add an `asyncio.wait_for()` wrapper with a configurable timeout for resilience.
+- [x] **No timeout/retry on SDK calls** — Added `asyncio.wait_for()` with a configurable `TIMEOUT_SECONDS` (default 120s) on both `start_conversation` and `ask_question` calls. Timeouts are reported as `[TIMEOUT]` in the eval report.
 
 - [x] **Single conversation for all evals** — Each prompt now gets a fresh conversation by default. Multi-turn flows are supported via the optional `conversation_id` CSV column.
 
