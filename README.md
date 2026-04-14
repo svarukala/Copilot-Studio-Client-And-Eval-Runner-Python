@@ -43,7 +43,7 @@ Python client for chatting with Microsoft Copilot Studio agents using the M365 A
 python chat.py
 ```
 
-A browser window will open for authentication (interactive mode). After login, you can chat with the agent in the terminal. Type `exit` or `quit` to end the session.
+A browser window will open for authentication on first run. The token is cached locally (`.token_cache.bin`), so subsequent runs skip the login prompt until the refresh token expires. Type `exit` or `quit` to end the session.
 
 ### Prompt Evaluation
 
@@ -80,10 +80,10 @@ Each row runs in a **fresh conversation** by default, so earlier answers don't i
 
 The optional `attachment` column lets you send a file alongside the prompt:
 
-- **URL** (`https://...`) — sent as-is via `content_url` on the attachment
-- **Local file path** (`report.pdf`) — the file is base64-encoded into a data URI and sent inline
+- **URL** (`https://...`) — downloaded and base64-encoded into a data URI
+- **Local file path** (`report.pdf`, `C:\docs\test.pdf`) — read from disk and base64-encoded
 
-Under the hood, prompts with attachments use `ask_question_with_activity()` to send a full `Activity` object with an `attachments` list, while text-only prompts use the simpler `ask_question()`.
+Both are sent inline as `data:` URIs because the Direct-to-Engine API does not fetch external URLs on behalf of the agent. Under the hood, prompts with attachments use `ask_question_with_activity()` to send a full `Activity` object, while text-only prompts use the simpler `ask_question()`.
 
 ### Match Methods
 
@@ -102,7 +102,7 @@ For `fuzzy` and `partial`, the threshold is appended to the expected response wi
 
 ### Interactive Mode (default)
 
-Uses `msal.PublicClientApplication` with a browser popup. MSAL caches the token after first login, so subsequent runs use `acquire_token_silent` without re-prompting (until the token expires).
+Uses `msal.PublicClientApplication` with a browser popup. The token cache is persisted to `.token_cache.bin`, so subsequent runs use `acquire_token_silent` without re-prompting. MSAL automatically refreshes expired access tokens using the cached refresh token. You'll only see a browser login again when the refresh token itself expires (~90 days).
 
 ```env
 AUTH_MODE=interactive
@@ -136,6 +136,10 @@ COPILOTSTUDIO_APP_CLIENT_SECRET=your-secret
 - `ask_question_with_activity()` accepts a full `Activity` object (used for attachments)
 - Activity types: `message`, `typing`, `event`, `end_of_conversation` (from `microsoft_agents.activity.ActivityTypes`)
 - Auth scope: `https://api.powerplatform.com/.default`
+
+## Roadmap
+
+- **LLM-as-a-Judge evaluation** — Use a large language model to evaluate agent responses instead of (or alongside) deterministic match methods. This would support open-ended quality checks like "Is the response helpful and accurate?" without requiring exact expected text. If you're interested in this feature, please open an issue or upvote an existing one.
 
 ## References
 
