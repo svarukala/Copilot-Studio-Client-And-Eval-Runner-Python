@@ -44,7 +44,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
-from microsoft_agents.activity import Activity, Attachment, ActivityTypes
+from microsoft_agents.activity import Activity, Attachment, ActivityTypes, ConversationAccount
 from microsoft_agents.copilotstudio.client import ConnectionSettings, CopilotClient
 
 from config import AgentSettings
@@ -191,23 +191,38 @@ def group_cases_by_conversation(cases: list[EvalCase]) -> OrderedDict[str, list[
     return groups
 
 
+def _to_data_uri(content_type: str, data: bytes) -> str:
+    """Encode raw bytes as a base64 data URI."""
+    b64 = base64.b64encode(data).decode("ascii")
+    return f"data:{content_type};base64,{b64}"
+
+
 def build_attachment(raw: str) -> Attachment:
     """Build an Attachment from a URL or local file path.
 
-    URLs (http/https) are sent as content_url.  Local files are base64-encoded
-    into a ``data:`` URI so they travel inline over the JSON transport.
+    Both URLs and local files are base64-encoded into a ``data:`` URI so the
+    file content travels inline in the JSON payload.  The Direct-to-Engine API
+    does not fetch external URLs on behalf of the agent.
     """
     if raw.startswith(("http://", "https://")):
-        content_type = mimetypes.guess_type(raw)[0] or "application/octet-stream"
+        import urllib.request
         name = raw.rsplit("/", 1)[-1].split("?")[0] or "attachment"
-        return Attachment(content_type=content_type, content_url=raw, name=name)
+        content_type = mimetypes.guess_type(name)[0] or "application/octet-stream"
+        print(f"  Downloading {raw} ...")
+        with urllib.request.urlopen(raw) as resp:
+            data = resp.read()
+            # Use content-type from server if available
+            server_ct = resp.headers.get("Content-Type", "").split(";")[0].strip()
+            if server_ct:
+                content_type = server_ct
+        data_uri = _to_data_uri(content_type, data)
+        return Attachment(content_type=content_type, content_url=data_uri, name=name)
 
     path = Path(raw)
     if not path.is_file():
         raise FileNotFoundError(f"Attachment file not found: {raw}")
     content_type = mimetypes.guess_type(path.name)[0] or "application/octet-stream"
-    b64 = base64.b64encode(path.read_bytes()).decode("ascii")
-    data_uri = f"data:{content_type};base64,{b64}"
+    data_uri = _to_data_uri(content_type, path.read_bytes())
     return Attachment(content_type=content_type, content_url=data_uri, name=path.name)
 
 
@@ -219,6 +234,7 @@ async def collect_response(client: CopilotClient, case: EvalCase) -> str:
             type="message",
             text=case.prompt,
             attachments=[attachment],
+            conversation=ConversationAccount(id=client._current_conversation_id),
         )
         print(f"  [attachment: {attachment.name}]")
         response_gen = client.ask_question_with_activity(activity)
