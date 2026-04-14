@@ -5,8 +5,17 @@ Python client for chatting with Microsoft Copilot Studio agents using the M365 A
 ## Prerequisites
 
 - Python 3.10+
-- An Azure AD app registration with a client ID
-- A published Copilot Studio agent (you'll need the environment ID, schema name, and tenant ID)
+- A published Copilot Studio agent (you'll need the environment ID, schema name, and tenant ID — found in Copilot Studio under **Settings > Advanced > Metadata**)
+- An Azure AD app registration (see below)
+
+## Create an App Registration
+
+1. Go to [Azure Portal > App registrations](https://portal.azure.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade) and click **New registration**
+2. Name it (e.g., `copilot-studio-client`), set **Supported account types** to *Single tenant*, and click **Register**
+3. On the app's **Overview** page, copy the **Application (client) ID** — this is your `COPILOTSTUDIO_APP_CLIENT_ID`
+4. Go to **Authentication > Add a platform > Mobile and desktop applications** and add `http://localhost` as a redirect URI
+5. Under **API permissions > Add a permission > APIs my organization uses**, search for `Power Platform API` (`https://api.powerplatform.com`), select **Delegated permissions**, and add `user_impersonation`
+6. Click **Grant admin consent** (or ask your admin)
 
 ## Setup
 
@@ -32,8 +41,6 @@ Python client for chatting with Microsoft Copilot Studio agents using the M365 A
    COPILOTSTUDIO_APP_CLIENT_SECRET=
    AUTH_MODE=interactive
    ```
-
-   You can find the environment ID, schema name, and tenant ID in the Copilot Studio portal. Open your agent, under **Settings > Advanced > Metadata**.
 
 ## Usage
 
