@@ -1,7 +1,9 @@
 """Interactive console chat with a Copilot Studio agent via Direct-to-Engine."""
 
 import asyncio
+import atexit
 import sys
+from pathlib import Path
 
 import msal
 from microsoft_agents.activity import ActivityTypes
@@ -9,14 +11,34 @@ from microsoft_agents.copilotstudio.client import ConnectionSettings, CopilotCli
 
 from config import AgentSettings
 
+CACHE_PATH = Path(__file__).parent / ".token_cache.bin"
+
+
+def _load_cache() -> msal.SerializableTokenCache:
+    """Load a persistent MSAL token cache from disk."""
+    cache = msal.SerializableTokenCache()
+    if CACHE_PATH.exists():
+        cache.deserialize(CACHE_PATH.read_text(encoding="utf-8"))
+    atexit.register(_save_cache, cache)
+    return cache
+
+
+def _save_cache(cache: msal.SerializableTokenCache) -> None:
+    """Write the token cache to disk if it changed."""
+    if cache.has_state_changed:
+        CACHE_PATH.write_text(cache.serialize(), encoding="utf-8")
+
 
 def acquire_token(settings: AgentSettings) -> str:
     """Acquire an access token using MSAL (interactive or S2S)."""
+    cache = _load_cache()
+
     if settings.use_s2s:
         app = msal.ConfidentialClientApplication(
             client_id=settings.app_client_id,
             client_credential=settings.app_client_secret,
             authority=f"https://login.microsoftonline.com/{settings.tenant_id}",
+            token_cache=cache,
         )
         result = app.acquire_token_for_client(
             scopes=["https://api.powerplatform.com/.default"]
@@ -25,6 +47,7 @@ def acquire_token(settings: AgentSettings) -> str:
         app = msal.PublicClientApplication(
             client_id=settings.app_client_id,
             authority=f"https://login.microsoftonline.com/{settings.tenant_id}",
+            token_cache=cache,
         )
         accounts = app.get_accounts()
         if accounts:

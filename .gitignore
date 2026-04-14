@@ -1,6 +1,7 @@
 __pycache__/
 *.pyc
 .env
+.token_cache.bin
 .venv/
 venv/
 dist/
