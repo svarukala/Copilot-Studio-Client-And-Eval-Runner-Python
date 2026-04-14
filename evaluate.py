@@ -137,7 +137,7 @@ class EvalReport:
             print(f"\n[{status}] #{i}: {r.case.prompt}")
             print(f"  Match method : {r.case.match_method}")
             print(f"  Expected     : {r.case.expected_response}")
-            print(f"  Actual       : {r.actual_response[:200]}")
+            print(f"  Actual       : {r.actual_response[:500]}")
             if r.error:
                 print(f"  Error        : {r.error}")
         print("\n" + "-" * 60)
