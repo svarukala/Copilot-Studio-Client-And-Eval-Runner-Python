@@ -1,18 +1,18 @@
 """Run prompt evaluations against a Copilot Studio agent from a CSV file.
 
 CSV format:
-    prompt,expected_response,match_method[,conversation_id][,attachment]
+    prompt,expected_response,match_method[,conversation_id][,attachment][,skip]
     "What is your name?","Help Desk","contains"
 
 Each row gets a fresh conversation by default. To run multiple prompts in the
 same conversation (multi-turn), give them the same ``conversation_id``:
 
-    prompt,expected_response,match_method,conversation_id,attachment
-    "Hi","hello",contains,greeting_flow,
-    "What are your hours?","9am",contains,greeting_flow,
-    "Reset my password","done",contains,,
-    "Analyze this","summary",contains,,report.pdf
-    "Describe image","cat",contains,,https://example.com/photo.png
+    prompt,expected_response,match_method,conversation_id,attachment,skip
+    "Hi","hello",contains,greeting_flow,,
+    "What are your hours?","9am",contains,greeting_flow,,
+    "Reset my password","done",contains,,,
+    "Analyze this","summary",contains,,report.pdf,
+    "Describe image","cat",contains,,https://example.com/photo.png,true
 
 Rows without a conversation_id (or with an empty value) each start their own
 conversation. Rows sharing the same conversation_id are sent sequentially
@@ -163,11 +163,17 @@ class EvalReport:
         print(f"\nResults saved to {path}")
 
 
-def load_cases(csv_path: str) -> list[EvalCase]:
+def load_cases(csv_path: str) -> tuple[list[EvalCase], int]:
+    """Load eval cases from CSV, returning (cases, skipped_count)."""
     cases = []
+    skipped = 0
     with open(csv_path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
+            skip = row.get("skip", "").strip().lower()
+            if skip in ("true", "yes", "1"):
+                skipped += 1
+                continue
             cases.append(EvalCase(
                 prompt=row["prompt"],
                 expected_response=row["expected_response"],
@@ -175,7 +181,7 @@ def load_cases(csv_path: str) -> list[EvalCase]:
                 conversation_id=row.get("conversation_id", "").strip(),
                 attachment=row.get("attachment", "").strip(),
             ))
-    return cases
+    return cases, skipped
 
 
 def group_cases_by_conversation(cases: list[EvalCase]) -> OrderedDict[str, list[EvalCase]]:
@@ -278,12 +284,13 @@ async def run_evaluation(csv_path: str, output_path: str | None = None) -> EvalR
     token = acquire_token(settings)
     timeout = settings.timeout
 
-    cases = load_cases(csv_path)
+    cases, skipped = load_cases(csv_path)
     groups = group_cases_by_conversation(cases)
     total = len(cases)
     multi_turn_groups = sum(1 for g in groups.values() if len(g) > 1)
     solo_count = sum(1 for g in groups.values() if len(g) == 1)
-    print(f"Loaded {total} evaluation cases from {csv_path}")
+    print(f"Loaded {total} evaluation cases from {csv_path}" +
+          (f" ({skipped} skipped)" if skipped else ""))
     print(f"  {solo_count} independent prompt(s), {multi_turn_groups} multi-turn conversation(s)")
     print(f"  Timeout: {timeout}s per call\n")
 
@@ -327,11 +334,12 @@ async def run_evaluation(csv_path: str, output_path: str | None = None) -> EvalR
 def main():
     if len(sys.argv) < 2:
         print("Usage: python evaluate.py <input.csv> [output.csv]")
-        print("\nCSV columns: prompt, expected_response, match_method[, conversation_id][, attachment]")
+        print("\nCSV columns: prompt, expected_response, match_method[, conversation_id][, attachment][, skip]")
         print("Match methods: exact, contains, not_contains, regex, fuzzy, partial")
         print("\nRows with the same conversation_id share one conversation (multi-turn).")
         print("Rows without a conversation_id each get a fresh conversation.")
         print("Attachment: URL or local file path (optional). Local files are base64-encoded.")
+        print("Skip: set to true/yes/1 to skip a row without removing it from the CSV.")
         sys.exit(1)
 
     csv_path = sys.argv[1]

@@ -63,21 +63,25 @@ python evaluate.py input.csv results/output.csv     # explicit output path
 
 ## Evaluation CSV Format
 
-Create a CSV with these columns (`conversation_id` and `attachment` are optional):
+Create a CSV with these columns (`conversation_id`, `attachment`, and `skip` are optional):
 
 ```csv
-prompt,expected_response,match_method,conversation_id,attachment
-"Hello","hello",contains,,
-"What is 2+2?","4",exact,,
-"Tell me about policies","policy|procedure",regex,,
-"Reset my password","credit card",not_contains,,
-"Describe our benefits","health insurance",fuzzy,,
-"Explain the leave policy","parental leave|80",partial,,
-"Hi","hello",contains,benefits_flow,
-"Tell me about dental","80%",contains,benefits_flow,
-"Summarize this","key points",contains,,report.pdf
-"Describe image","chart",contains,,https://example.com/chart.png
+prompt,expected_response,match_method,conversation_id,attachment,skip
+"Hello","hello",contains,,,
+"What is 2+2?","4",exact,,,
+"Tell me about policies","policy|procedure",regex,,,
+"Reset my password","credit card",not_contains,,,
+"Describe our benefits","health insurance",fuzzy,,,
+"Explain the leave policy","parental leave|80",partial,,,
+"Hi","hello",contains,benefits_flow,,
+"Tell me about dental","80%",contains,benefits_flow,,
+"Summarize this","key points",contains,,report.pdf,
+"Describe image","chart",contains,,https://example.com/chart.png,true
 ```
+
+### Skipping Rows
+
+Set the `skip` column to `true`, `yes`, or `1` to exclude a row from the eval run without deleting it from the CSV. Useful for temporarily disabling flaky or work-in-progress test cases.
 
 ### Conversation Isolation
 
