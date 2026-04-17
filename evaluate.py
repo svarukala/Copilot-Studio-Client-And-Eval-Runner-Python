@@ -273,12 +273,21 @@ async def _collect_activities(response_gen, client: CopilotClient) -> str:
                         if card_text:
                             parts.append(card_text)
                             print(f"  {card_text}")
-            # Auto-approve consent cards and collect follow-up response
+            # Auto-approve consent cards (may need multiple rounds)
             if is_consent_card(activity):
                 follow_ups = await handle_consent_card(client, activity)
                 for fu in follow_ups:
-                    if fu.type == ActivityTypes.message and fu.text:
-                        parts.append(fu.text)
+                    if fu.type == ActivityTypes.message:
+                        if fu.text:
+                            parts.append(fu.text)
+                        # Handle chained consent cards
+                        if is_consent_card(fu):
+                            follow_ups2 = await handle_consent_card(client, fu)
+                            for fu2 in follow_ups2:
+                                if fu2.type == ActivityTypes.message and fu2.text:
+                                    parts.append(fu2.text)
+                                if fu2.type == ActivityTypes.end_of_conversation:
+                                    return "\n".join(parts)
                     if fu.type == ActivityTypes.end_of_conversation:
                         return "\n".join(parts)
         elif activity.type == ActivityTypes.end_of_conversation:
