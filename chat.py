@@ -151,11 +151,27 @@ _CONSENT_PHRASES = [
 ]
 
 
+def _find_in_card(element, predicate) -> bool:
+    """Recursively search an adaptive card tree for an element matching predicate."""
+    if isinstance(element, dict):
+        if predicate(element):
+            return True
+        for value in element.values():
+            if _find_in_card(value, predicate):
+                return True
+    elif isinstance(element, list):
+        for child in element:
+            if _find_in_card(child, predicate):
+                return True
+    return False
+
+
 def is_consent_card(activity) -> bool:
     """Detect a consent card using heuristics on the adaptive card content.
 
     A consent card is an adaptive card whose body contains a TextBlock with
-    a known consent phrase AND an ActionSet with Action.Submit buttons.
+    a known consent phrase AND an Action.Submit button anywhere in the tree
+    (may be nested inside ColumnSet > Column > items > ActionSet).
     """
     if getattr(activity, "type", None) != "message":
         return False
@@ -166,28 +182,17 @@ def is_consent_card(activity) -> bool:
         content = getattr(att, "content", None)
         if not isinstance(content, dict):
             continue
-        body = content.get("body", [])
-        if not isinstance(body, list):
-            continue
-        # Check for a known consent phrase in any TextBlock
-        has_phrase = any(
-            isinstance(block, dict)
-            and block.get("type") == "TextBlock"
-            and any(p in (block.get("text", "") or "").lower() for p in _CONSENT_PHRASES)
-            for block in body
-        )
+        # Check for a known consent phrase in any TextBlock (recursive)
+        has_phrase = _find_in_card(content, lambda el: (
+            el.get("type") == "TextBlock"
+            and any(p in (el.get("text", "") or "").lower() for p in _CONSENT_PHRASES)
+        ))
         if not has_phrase:
             continue
-        # Check for Action.Submit buttons (inside ActionSet elements in body)
-        has_submit = False
-        for block in body:
-            if isinstance(block, dict) and block.get("type") == "ActionSet":
-                for action in block.get("actions", []):
-                    if isinstance(action, dict) and action.get("type", "").lower() == "action.submit":
-                        has_submit = True
-                        break
-            if has_submit:
-                break
+        # Check for Action.Submit anywhere in the tree
+        has_submit = _find_in_card(content, lambda el: (
+            el.get("type", "").lower() == "action.submit"
+        ))
         if has_submit:
             return True
     return False
