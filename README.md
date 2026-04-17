@@ -109,6 +109,17 @@ Both are sent inline as `data:` URIs because the Direct-to-Engine API does not f
 
 For `fuzzy` and `partial`, the threshold is appended to the expected response with a `|` separator. The score (0-100%) is printed during evaluation for visibility.
 
+### Connector Consent Cards
+
+When an agent uses connectors (e.g., SharePoint, Office 365) that require user authentication, the agent sends an adaptive card asking for consent. Both `chat.py` and `evaluate.py` **automatically approve** these consent cards so the conversation can proceed without manual intervention.
+
+How it works:
+- **Detection**: Content-based heuristic — looks for an adaptive card with a TextBlock containing `"Connect to continue"` or `"Agent needs your permission to continue"`, plus `Action.Submit` buttons
+- **Approval**: Sends a postBack activity with `value: {action: "Allow", id: "submit", shouldAwaitUserInput: true}` via `client.execute()`
+- **Chained consent**: Multiple consent cards may arrive in sequence (e.g., for multiple connectors). Both are handled automatically
+
+Reference: [Connector Consent Card (OBO)](https://microsoft.github.io/mcscatblog/posts/connector-consent-card-obo/)
+
 ## Authentication
 
 ### Interactive Mode (default)

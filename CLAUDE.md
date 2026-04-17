@@ -23,8 +23,8 @@ python evaluate.py input.csv output.csv         # explicit output path
 ## Architecture
 
 - **config.py** - `AgentSettings` dataclass loaded from `.env`; supports both interactive (browser) and S2S (client credentials) auth modes via `AUTH_MODE`
-- **chat.py** - Interactive console chat loop. Authenticates via MSAL, creates a `CopilotClient` (from `microsoft-agents-copilotstudio-client`), calls `start_conversation()` then `ask_question()` in a loop. The `acquire_token()` and `create_copilot_client()` functions are reused by `evaluate.py`.
-- **evaluate.py** - Reads a CSV of `(prompt, expected_response, match_method)`, runs each prompt against the agent in a single conversation, checks the response, and outputs a pass/fail report + results CSV.
+- **chat.py** - Interactive console chat loop. Authenticates via MSAL, creates a `CopilotClient` (from `microsoft-agents-copilotstudio-client`), calls `start_conversation()` then `ask_question()` in a loop. The `acquire_token()` and `create_copilot_client()` functions are reused by `evaluate.py`. Also exports consent card handling (`is_consent_card()`, `handle_consent_card()`) used by both chat and eval flows.
+- **evaluate.py** - Reads a CSV of `(prompt, expected_response, match_method)`, runs each prompt against the agent in its own conversation, checks the response, and outputs a pass/fail report + results CSV. Auto-approves connector consent cards.
 
 ## Key SDK Details
 
@@ -33,6 +33,15 @@ python evaluate.py input.csv output.csv         # explicit output path
 - `start_conversation()` returns an async generator of activities (greeting). `ask_question()` returns an async generator per question.
 - Activity types come from `microsoft_agents.activity.ActivityTypes` (`message`, `typing`, `end_of_conversation`).
 - Auth scope for Power Platform: `https://api.powerplatform.com/.default`
+- `execute(conversation_id, activity)` sends an arbitrary Activity with an explicit conversation ID (used for consent card approval)
+
+## Consent Card Handling
+
+When the agent uses connectors requiring user auth, it sends a consent card (adaptive card with "Connect to continue" text). Both `chat.py` and `evaluate.py` auto-approve these by sending a postBack activity:
+- Detection: heuristic on card content (consent phrase + Action.Submit buttons), searched recursively through the card tree
+- Submit payload: `type="message"`, `channel_data={"postBack": True}`, `value={"action": "Allow", "id": "submit", "shouldAwaitUserInput": True}`
+- Sent via `client.execute()` which handles conversation ID routing
+- Multiple consent cards may arrive in sequence and are handled automatically
 
 ## Configuration
 
