@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 import msal
-from microsoft_agents.activity import Activity, ActivityTypes, ChannelAccount, ConversationAccount
+from microsoft_agents.activity import Activity, ActivityTypes
 from microsoft_agents.copilotstudio.client import ConnectionSettings, CopilotClient
 
 from config import AgentSettings
@@ -209,8 +209,6 @@ async def handle_consent_card(client: CopilotClient, activity, choice: str = "Al
     submit = Activity(
         type="message",
         channel_data={"postBack": True},
-        from_property=ChannelAccount(id="user", role="user"),
-        conversation=ConversationAccount(id=client._current_conversation_id),
         value={
             "action": choice,
             "id": "submit",
@@ -218,8 +216,9 @@ async def handle_consent_card(client: CopilotClient, activity, choice: str = "Al
         },
     )
 
+    conv_id = client._current_conversation_id
     follow_ups = []
-    async for follow_up in client.ask_question_with_activity(submit):
+    async for follow_up in client.execute(conv_id, submit):
         follow_ups.append(follow_up)
     return follow_ups
 
