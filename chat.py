@@ -6,7 +6,7 @@ import sys
 from pathlib import Path
 
 import msal
-from microsoft_agents.activity import Activity, ActivityTypes
+from microsoft_agents.activity import Activity, ActivityTypes, ChannelAccount
 from microsoft_agents.copilotstudio.client import ConnectionSettings, CopilotClient
 
 from config import AgentSettings
@@ -144,85 +144,72 @@ def _print_card(content_type: str, content) -> None:
 # Consent card handling
 # ---------------------------------------------------------------------------
 
-CONSENT_CARD_NAME = "aiPrompt/consentCard"
+# Known phrases that appear in consent card TextBlocks.
+_CONSENT_PHRASES = [
+    "connect to continue",
+    "agent needs your permission to continue",
+]
 
 
 def is_consent_card(activity) -> bool:
-    """Check if an activity is a consent card that needs auto-approval."""
+    """Detect a consent card using heuristics on the adaptive card content.
+
+    A consent card is an adaptive card whose body contains a TextBlock with
+    a known consent phrase AND an ActionSet with Action.Submit buttons.
+    """
     if getattr(activity, "type", None) != "message":
         return False
-    name = getattr(activity, "name", None) or ""
-    return name.lower() == CONSENT_CARD_NAME.lower()
-
-
-def extract_consent_actions(activity) -> dict[str, object]:
-    """Extract Action.Submit title->data mappings from consent card attachments."""
-    actions: dict[str, object] = {}
-    attachments = getattr(activity, "attachments", None) or []
-    for att in attachments:
+    for att in getattr(activity, "attachments", None) or []:
         ct = (getattr(att, "content_type", "") or "").lower()
         if ct != "application/vnd.microsoft.card.adaptive":
             continue
         content = getattr(att, "content", None)
         if not isinstance(content, dict):
             continue
-        _collect_submit_actions(content, actions)
-    return actions
-
-
-def _collect_submit_actions(element, actions: dict[str, object]) -> None:
-    """Recursively find Action.Submit entries in an adaptive card payload."""
-    if isinstance(element, dict):
-        for action in element.get("actions", []):
-            if not isinstance(action, dict):
-                continue
-            if action.get("type", "").lower() != "action.submit":
-                continue
-            title = action.get("title", "")
-            data = action.get("data")
-            if title and data is not None:
-                actions[title] = data
-        for value in element.values():
-            _collect_submit_actions(value, actions)
-    elif isinstance(element, list):
-        for child in element:
-            _collect_submit_actions(child, actions)
+        body = content.get("body", [])
+        if not isinstance(body, list):
+            continue
+        # Check for a known consent phrase in any TextBlock
+        has_phrase = any(
+            isinstance(block, dict)
+            and block.get("type") == "TextBlock"
+            and any(p in (block.get("text", "") or "").lower() for p in _CONSENT_PHRASES)
+            for block in body
+        )
+        if not has_phrase:
+            continue
+        # Check for Action.Submit buttons (inside ActionSet elements in body)
+        has_submit = False
+        for block in body:
+            if isinstance(block, dict) and block.get("type") == "ActionSet":
+                for action in block.get("actions", []):
+                    if isinstance(action, dict) and action.get("type", "").lower() == "action.submit":
+                        has_submit = True
+                        break
+            if has_submit:
+                break
+        if has_submit:
+            return True
+    return False
 
 
 async def handle_consent_card(client: CopilotClient, activity, choice: str = "Allow") -> list:
     """Auto-approve a consent card and return follow-up activities.
 
-    Sends an Activity with type='message', value=<action data>,
-    name='aiPrompt/consentCard' via client.execute().
+    Builds a postBack activity with a hardcoded value payload matching the
+    Bot Framework consent protocol and sends it via ask_question_with_activity().
     """
-    conv_id = ""
-    if getattr(activity, "conversation", None):
-        conv_id = getattr(activity.conversation, "id", "") or ""
-    if not conv_id:
-        conv_id = client._current_conversation_id
+    print(f"  [consent] Auto-approving with '{choice}'...")
 
-    actions = extract_consent_actions(activity)
-    if not actions:
-        print("  [consent] No submit actions found in consent card.")
-        return []
-
-    action_titles = list(actions.keys())
-    print(f"  [consent] Available actions: {', '.join(action_titles)}")
-
-    # Pick the requested choice, fall back to first available
-    if choice in actions:
-        data = actions[choice]
-    else:
-        print(f"  [consent] '{choice}' not found, using '{action_titles[0]}'")
-        data = actions[action_titles[0]]
-        choice = action_titles[0]
-
-    print(f"  [consent] Auto-approving: {choice}")
-
-    submit = Activity(type="message", value=data, name=CONSENT_CARD_NAME)
+    submit = Activity(
+        type="message",
+        channel_data={"postBack": True},
+        from_property=ChannelAccount(id="user"),
+        value={"action": choice, "id": "submit"},
+    )
 
     follow_ups = []
-    async for follow_up in client.execute(conv_id, submit):
+    async for follow_up in client.ask_question_with_activity(submit):
         follow_ups.append(follow_up)
     return follow_ups
 
@@ -255,6 +242,10 @@ async def run_chat() -> None:
                 follow_ups = await handle_consent_card(client, activity)
                 for fu in follow_ups:
                     print_activity(fu)
+                    if is_consent_card(fu):
+                        follow_ups2 = await handle_consent_card(client, fu)
+                        for fu2 in follow_ups2:
+                            print_activity(fu2)
                     if fu.type == ActivityTypes.end_of_conversation:
                         return
             if activity.type == ActivityTypes.end_of_conversation:
