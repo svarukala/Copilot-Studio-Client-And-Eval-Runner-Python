@@ -201,17 +201,21 @@ def is_consent_card(activity) -> bool:
 async def handle_consent_card(client: CopilotClient, activity, choice: str = "Allow") -> list:
     """Auto-approve a consent card and return follow-up activities.
 
-    Builds a postBack activity with a hardcoded value payload matching the
-    Bot Framework consent protocol and sends it via ask_question_with_activity().
+    Builds a postBack activity matching the payload observed in Copilot Studio's
+    own network trace and sends it via ask_question_with_activity().
     """
     print(f"  [consent] Auto-approving with '{choice}'...")
 
     submit = Activity(
         type="message",
         channel_data={"postBack": True},
-        from_property=ChannelAccount(id="user"),
+        from_property=ChannelAccount(id="user", role="user"),
         conversation=ConversationAccount(id=client._current_conversation_id),
-        value={"action": choice, "id": "submit"},
+        value={
+            "action": choice,
+            "id": "submit",
+            "shouldAwaitUserInput": True,
+        },
     )
 
     follow_ups = []
