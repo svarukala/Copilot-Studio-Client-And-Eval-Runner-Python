@@ -48,7 +48,7 @@ from microsoft_agents.activity import Activity, Attachment, ActivityTypes, Conve
 from microsoft_agents.copilotstudio.client import ConnectionSettings, CopilotClient
 
 from config import AgentSettings
-from chat import acquire_token
+from chat import acquire_token, is_consent_card, handle_consent_card
 
 
 @dataclass
@@ -254,8 +254,11 @@ def _extract_card_text(content_type: str, content) -> str | None:
         return f"[{card_type}] {body.get('title', body.get('text', ''))}"
 
 
-async def _collect_activities(response_gen) -> str:
-    """Iterate an async activity generator and join message texts."""
+async def _collect_activities(response_gen, client: CopilotClient) -> str:
+    """Iterate an async activity generator and join message texts.
+
+    Automatically approves consent cards so the conversation can proceed.
+    """
     parts: list[str] = []
     async for activity in response_gen:
         if activity.type == ActivityTypes.message:
@@ -270,6 +273,14 @@ async def _collect_activities(response_gen) -> str:
                         if card_text:
                             parts.append(card_text)
                             print(f"  {card_text}")
+            # Auto-approve consent cards and collect follow-up response
+            if is_consent_card(activity):
+                follow_ups = await handle_consent_card(client, activity)
+                for fu in follow_ups:
+                    if fu.type == ActivityTypes.message and fu.text:
+                        parts.append(fu.text)
+                    if fu.type == ActivityTypes.end_of_conversation:
+                        return "\n".join(parts)
         elif activity.type == ActivityTypes.end_of_conversation:
             break
     return "\n".join(parts)
@@ -290,7 +301,7 @@ async def collect_response(client: CopilotClient, case: EvalCase, timeout: int) 
     else:
         response_gen = client.ask_question(case.prompt)
 
-    return await asyncio.wait_for(_collect_activities(response_gen), timeout=timeout)
+    return await asyncio.wait_for(_collect_activities(response_gen, client), timeout=timeout)
 
 
 async def start_new_conversation(conn: ConnectionSettings, token: str, conv_label: str, timeout: int) -> CopilotClient:
