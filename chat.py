@@ -85,6 +85,14 @@ def print_activity(activity) -> None:
     if activity.type == ActivityTypes.message:
         if activity.text:
             print(activity.text)
+        if getattr(activity, "attachments", None):
+            for att in activity.attachments:
+                ct = getattr(att, "content_type", "") or ""
+                content = getattr(att, "content", None)
+                if content and "application/vnd.microsoft.card" in ct:
+                    _print_card(ct, content)
+                elif content:
+                    print(f"  [Attachment: {ct}]")
         if getattr(activity, "suggested_actions", None):
             for action in activity.suggested_actions.actions:
                 title = getattr(action, "title", None) or getattr(action, "text", "")
@@ -95,6 +103,41 @@ def print_activity(activity) -> None:
         print("+", end="", flush=True)
     elif activity.type == ActivityTypes.end_of_conversation:
         print("\n[End of conversation]")
+
+
+def _print_card(content_type: str, content) -> None:
+    """Pretty-print a Bot Framework card attachment."""
+    card_type = content_type.rsplit(".", 1)[-1] if "." in content_type else content_type
+    body = content if isinstance(content, dict) else {}
+
+    # Adaptive Card / Consent Card
+    if card_type == "card.adaptive":
+        card_body = body.get("body", [])
+        for block in card_body:
+            text = block.get("text", "")
+            if text:
+                print(f"  [Card] {text}")
+        for action in body.get("actions", []):
+            title = action.get("title", "")
+            url = action.get("url", "")
+            if title:
+                print(f"  [Card Action] {title}" + (f" -> {url}" if url else ""))
+        if not card_body and not body.get("actions"):
+            print(f"  [Adaptive Card] {body}")
+    # Sign-in card
+    elif card_type == "card.signin":
+        text = body.get("text", "Sign in required")
+        print(f"  [Sign-in Card] {text}")
+        for btn in body.get("buttons", []):
+            print(f"  [Sign-in] {btn.get('title', 'Sign in')} -> {btn.get('value', '')}")
+    # OAuth card
+    elif card_type == "card.oauth":
+        text = body.get("text", "Authentication required")
+        print(f"  [OAuth Card] {text}")
+        for btn in body.get("buttons", []):
+            print(f"  [OAuth] {btn.get('title', 'Sign in')} -> {btn.get('value', '')}")
+    else:
+        print(f"  [{card_type}] {body.get('title', body.get('text', ''))}")
 
 
 async def run_chat() -> None:

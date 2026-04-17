@@ -170,7 +170,7 @@ def load_cases(csv_path: str) -> tuple[list[EvalCase], int]:
     with open(csv_path, newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            skip = row.get("skip", "").strip().lower()
+            skip = (row.get("skip") or "").strip().lower()
             if skip in ("true", "yes", "1"):
                 skipped += 1
                 continue
@@ -232,12 +232,44 @@ def build_attachment(raw: str) -> Attachment:
     return Attachment(content_type=content_type, content_url=data_uri, name=path.name)
 
 
+def _extract_card_text(content_type: str, content) -> str | None:
+    """Extract readable text from a Bot Framework card attachment."""
+    card_type = content_type.rsplit(".", 1)[-1] if "." in content_type else content_type
+    body = content if isinstance(content, dict) else {}
+
+    if card_type == "card.adaptive":
+        lines = []
+        for block in body.get("body", []):
+            if block.get("text"):
+                lines.append(block["text"])
+        for action in body.get("actions", []):
+            if action.get("title"):
+                lines.append(f"[Action: {action['title']}]")
+        return " ".join(lines) if lines else f"[Adaptive Card]"
+    elif card_type == "card.signin":
+        return f"[Sign-in Card] {body.get('text', 'Sign in required')}"
+    elif card_type == "card.oauth":
+        return f"[OAuth Card] {body.get('text', 'Authentication required')}"
+    else:
+        return f"[{card_type}] {body.get('title', body.get('text', ''))}"
+
+
 async def _collect_activities(response_gen) -> str:
     """Iterate an async activity generator and join message texts."""
     parts: list[str] = []
     async for activity in response_gen:
-        if activity.type == ActivityTypes.message and activity.text:
-            parts.append(activity.text)
+        if activity.type == ActivityTypes.message:
+            if activity.text:
+                parts.append(activity.text)
+            if getattr(activity, "attachments", None):
+                for att in activity.attachments:
+                    ct = getattr(att, "content_type", "") or ""
+                    content = getattr(att, "content", None)
+                    if content and "application/vnd.microsoft.card" in ct:
+                        card_text = _extract_card_text(ct, content)
+                        if card_text:
+                            parts.append(card_text)
+                            print(f"  {card_text}")
         elif activity.type == ActivityTypes.end_of_conversation:
             break
     return "\n".join(parts)
