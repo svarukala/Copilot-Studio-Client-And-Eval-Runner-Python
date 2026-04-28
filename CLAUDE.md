@@ -25,6 +25,7 @@ python evaluate.py input.csv output.csv         # explicit output path
 - **config.py** - `AgentSettings` dataclass loaded from `.env`; supports both interactive (browser) and S2S (client credentials) auth modes via `AUTH_MODE`
 - **chat.py** - Interactive console chat loop. Authenticates via MSAL, creates a `CopilotClient` (from `microsoft-agents-copilotstudio-client`), calls `start_conversation()` then `ask_question()` in a loop. The `acquire_token()` and `create_copilot_client()` functions are reused by `evaluate.py`. Also exports consent card handling (`is_consent_card()`, `handle_consent_card()`) used by both chat and eval flows.
 - **evaluate.py** - Reads a CSV of `(prompt, expected_response, match_method)`, runs each prompt against the agent in its own conversation, checks the response, and outputs a pass/fail report + results CSV. Auto-approves connector consent cards.
+- **judge.py** - LLM-as-a-Judge support. Provides `judge_general_quality()`, `judge_text_similarity()`, `judge_compare_meaning()` functions that call a configurable LLM (Azure OpenAI, OpenAI, Ollama, or any OpenAI-compatible endpoint) and return a 0-100 score plus reasoning. All providers use the `openai` SDK with a configurable `base_url`.
 
 ## Key SDK Details
 
@@ -34,6 +35,15 @@ python evaluate.py input.csv output.csv         # explicit output path
 - Activity types come from `microsoft_agents.activity.ActivityTypes` (`message`, `typing`, `end_of_conversation`).
 - Auth scope for Power Platform: `https://api.powerplatform.com/.default`
 - `execute(conversation_id, activity)` sends an arbitrary Activity with an explicit conversation ID (used for consent card approval)
+
+## LLM-as-a-Judge
+
+For semantic match methods (`general_quality`, `text_similarity`, `compare_meaning`), `evaluate.py` delegates to `judge.py` which calls a configured LLM:
+- Set `JUDGE_PROVIDER` to one of: `azure_openai`, `openai`, `openai_compatible`, `ollama`
+- All providers use the `openai` Python SDK with a configurable `base_url`
+- Local LLMs (Ollama, LM Studio, vLLM) work out of the box with `JUDGE_PROVIDER=openai_compatible` or `ollama`
+- Judge prompts force JSON output (`response_format={"type": "json_object"}`) and use `temperature=0` for determinism
+- Threshold syntax matches `fuzzy`/`partial`: append `|N` (0-100) to override default threshold (70)
 
 ## Consent Card Handling
 

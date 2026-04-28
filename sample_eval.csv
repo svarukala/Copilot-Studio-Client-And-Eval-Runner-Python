@@ -1,8 +1,12 @@
 prompt,expected_response,match_method,conversation_id,attachment,skip
 "Hi","hello",contains,,
-"how much does company cover for dental costs","80%",contains,,
-"what is the parental leave policy","16 weeks",contains,,
-"Hi","hello",contains,benefits_flow,
-"Tell me about dental coverage","80%",contains,benefits_flow,
-"Summarize this document","summary",contains,,"C:\Users\svarukal\Downloads\Documents\Work\Ella.pdf"
-"What is the return customer rate?","80%",contains,,https://www.princexml.com/samples/newsletter/drylab.pdf
+"how much does company cover for dental costs","80%",contains,,,true
+"what is the parental leave policy","16 weeks",contains,,,true
+"Hi","hello",contains,benefits_flow,,true
+"Tell me about dental coverage","80%",contains,benefits_flow,,true
+"Summarize this document","summary",contains,,"C:\Users\svarukal\Downloads\Documents\Work\Ella.pdf",true
+"What is the return customer rate?","80%",contains,,https://www.princexml.com/samples/newsletter/drylab.pdf,true
+"List all the client names","Marriott",contains,,,
+"What is your role?","helpful, accurate, and on-topic|70",general_quality,,,true
+"What is 2+2?","Four",compare_meaning|85,,,true
+"Hello","Hi there!",text_similarity|70,,,true

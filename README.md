@@ -77,6 +77,9 @@ prompt,expected_response,match_method,conversation_id,attachment,skip
 "Tell me about dental","80%",contains,benefits_flow,,
 "Summarize this","key points",contains,,report.pdf,
 "Describe image","chart",contains,,https://example.com/chart.png,true
+"What is your role?","helpful, accurate, on-topic|70",general_quality,,,
+"What is 2+2?","Four",compare_meaning|85,,,
+"Hello","Hi there!",text_similarity|70,,,
 ```
 
 ### Skipping Rows
@@ -98,6 +101,8 @@ Both are sent inline as `data:` URIs because the Direct-to-Engine API does not f
 
 ### Match Methods
 
+#### Deterministic methods (no external service)
+
 | Method | Description |
 |--------|-------------|
 | `exact` | Response must equal expected text (case-insensitive) |
@@ -108,6 +113,26 @@ Both are sent inline as `data:` URIs because the Direct-to-Engine API does not f
 | `partial` | Best partial substring match + word overlap score. Default threshold: 70%. Use `expected_text\|80` for a custom threshold |
 
 For `fuzzy` and `partial`, the threshold is appended to the expected response with a `|` separator. The score (0-100%) is printed during evaluation for visibility.
+
+#### LLM-as-a-Judge methods (require JUDGE_* env vars)
+
+| Method | Description |
+|--------|-------------|
+| `general_quality` | LLM scores the response against a rubric/criteria (`expected_response` is the criteria). Default threshold: 70 |
+| `text_similarity` | LLM scores semantic similarity between expected and actual text. Default threshold: 70 |
+| `compare_meaning` | LLM scores whether the two texts convey the same meaning (paraphrase-tolerant). Default threshold: 70 |
+
+Like `fuzzy` and `partial`, append `|N` to the expected text to override the threshold (`expected_text|85`). The judge returns a 0-100 score and a one-line reasoning, both printed during evaluation.
+
+**Configuring the judge:** Set `JUDGE_PROVIDER`, `JUDGE_BASE_URL`, `JUDGE_API_KEY`, and `JUDGE_MODEL` in `.env`. Supports:
+- **Azure OpenAI** (`JUDGE_PROVIDER=azure_openai`) — requires endpoint, API key, deployment name, and `JUDGE_API_VERSION`
+- **OpenAI** (`JUDGE_PROVIDER=openai`) — requires API key and model id
+- **Ollama** (`JUDGE_PROVIDER=ollama`) — local, defaults to `http://localhost:11434/v1`, no API key needed
+- **OpenAI-compatible** (`JUDGE_PROVIDER=openai_compatible`) — for LM Studio, vLLM, llama.cpp server, etc. Supply your own `JUDGE_BASE_URL`
+
+See `.env.sample` for full configuration examples.
+
+**Cost note:** LLM judge calls use the configured provider's billing. Azure OpenAI and OpenAI charge per token. Local LLMs (Ollama, LM Studio) are free but may give noisier scores depending on model size — use 70B+ for best results, 8B for quick iteration.
 
 ### Connector Consent Cards
 
@@ -146,6 +171,7 @@ COPILOTSTUDIO_APP_CLIENT_SECRET=your-secret
 | `config.py` | `AgentSettings` dataclass loaded from `.env` |
 | `chat.py` | Interactive console chat loop; exports `acquire_token()` and `create_copilot_client()` reused by `evaluate.py` |
 | `evaluate.py` | CSV-driven prompt evaluation runner with pass/fail reporting |
+| `judge.py` | LLM-as-a-Judge support for `general_quality`, `text_similarity`, `compare_meaning` match methods |
 | `sample_eval.csv` | Example evaluation input file |
 | `pyproject.toml` | Project metadata and dependencies |
 
@@ -161,7 +187,7 @@ COPILOTSTUDIO_APP_CLIENT_SECRET=your-secret
 
 ## Roadmap
 
-- **LLM-as-a-Judge evaluation** — Use a large language model to evaluate agent responses instead of (or alongside) deterministic match methods. This would support open-ended quality checks like "Is the response helpful and accurate?" without requiring exact expected text. If you're interested in this feature, please open an issue or upvote an existing one.
+- ✅ **LLM-as-a-Judge evaluation** — Implemented. See the `general_quality`, `text_similarity`, and `compare_meaning` match methods.
 
 ## References
 

@@ -5,30 +5,23 @@ CSV format:
     "What is your name?","Help Desk","contains"
 
 Each row gets a fresh conversation by default. To run multiple prompts in the
-same conversation (multi-turn), give them the same ``conversation_id``:
-
-    prompt,expected_response,match_method,conversation_id,attachment,skip
-    "Hi","hello",contains,greeting_flow,,
-    "What are your hours?","9am",contains,greeting_flow,,
-    "Reset my password","done",contains,,,
-    "Analyze this","summary",contains,,report.pdf,
-    "Describe image","cat",contains,,https://example.com/photo.png,true
-
-Rows without a conversation_id (or with an empty value) each start their own
-conversation. Rows sharing the same conversation_id are sent sequentially
-within one conversation, in CSV order.
-
-The optional ``attachment`` column accepts:
-  - A URL (http/https) — sent as-is via ``content_url``
-  - A local file path — base64-encoded into a data URI
+same conversation (multi-turn), give them the same ``conversation_id``.
 
 Match methods:
-    exact        - response must equal expected (case-insensitive)
-    contains     - response must contain expected substring (case-insensitive)
-    not_contains - response must NOT contain the expected substring
-    regex        - expected is a regex pattern matched against the response
-    fuzzy        - similarity ratio >= threshold (default 70%). Use "expected|80" to set custom threshold
-    partial      - best partial substring match >= threshold (default 70%). Use "expected|80" for custom
+    Deterministic (no external service):
+        exact            - response must equal expected (case-insensitive)
+        contains         - response must contain expected substring (case-insensitive)
+        not_contains     - response must NOT contain the expected substring
+        regex            - expected is a regex pattern matched against the response
+        fuzzy            - similarity ratio >= threshold (default 70%). Use "expected|80"
+        partial          - best partial substring match >= threshold (default 70%)
+
+    LLM-as-a-Judge (requires JUDGE_* env vars — Azure OpenAI, OpenAI, Ollama, etc.):
+        general_quality  - score response quality against criteria (default 70)
+        text_similarity  - semantic similarity score (default 70)
+        compare_meaning  - whether texts convey the same meaning (default 70)
+
+Threshold syntax: append "|N" where N is 0-100 (e.g., "helpful answer|80").
 """
 
 import asyncio
@@ -69,8 +62,8 @@ class EvalCase:
                 pass
         return self.expected_response, 0.70
 
-    def check(self, actual: str) -> bool:
-        method = self.match_method.lower().strip()
+    def check(self, actual: str, settings: "AgentSettings | None" = None) -> bool:
+        method = self.match_method.lower().strip().split("|", 1)[0]
         if method == "exact":
             return actual.strip().lower() == self.expected_response.strip().lower()
         elif method == "contains":
@@ -99,9 +92,43 @@ class EvalCase:
             score = max(best, word_hits)
             print(f"  Partial score: {score:.1%} (threshold: {threshold:.0%})")
             return score >= threshold
+        elif method in ("general_quality", "text_similarity", "compare_meaning"):
+            if settings is None or not settings.has_judge_config:
+                print(f"  [ERROR] Match method '{method}' requires JUDGE_* env vars")
+                return False
+            return self._llm_judge(method, actual, settings)
         else:
             print(f"  [WARNING] Unknown match method '{method}', defaulting to 'contains'")
             return self.expected_response.lower() in actual.lower()
+
+    def _llm_judge(self, method: str, actual: str, settings: "AgentSettings") -> bool:
+        """Delegate to the LLM judge module for general_quality / text_similarity / compare_meaning."""
+        from judge import (
+            judge_general_quality,
+            judge_text_similarity,
+            judge_compare_meaning,
+        )
+
+        expected, threshold = self._parse_threshold()
+        threshold_pct = threshold * 100  # judge returns 0-100, threshold is 0-1
+
+        try:
+            if method == "general_quality":
+                result = judge_general_quality(settings, self.prompt, expected, actual)
+            elif method == "text_similarity":
+                result = judge_text_similarity(settings, expected, actual)
+            else:  # compare_meaning
+                result = judge_compare_meaning(settings, expected, actual)
+        except Exception as e:
+            print(f"  [ERROR] LLM judge call failed: {e}")
+            return False
+
+        passed = result.score >= threshold_pct
+        status = "PASS" if passed else "FAIL"
+        print(f"  Judge ({method}): {result.score:.0f}/100 [{status}] threshold={threshold_pct:.0f}")
+        if result.reasoning:
+            print(f"  Reasoning: {result.reasoning[:200]}")
+        return passed
 
 
 @dataclass
@@ -344,7 +371,10 @@ async def run_evaluation(csv_path: str, output_path: str | None = None) -> EvalR
     print(f"Loaded {total} evaluation cases from {csv_path}" +
           (f" ({skipped} skipped)" if skipped else ""))
     print(f"  {solo_count} independent prompt(s), {multi_turn_groups} multi-turn conversation(s)")
-    print(f"  Timeout: {timeout}s per call\n")
+    print(f"  Timeout: {timeout}s per call")
+    if settings.has_judge_config:
+        print(f"  LLM judge: {settings.judge_provider} ({settings.judge_model})")
+    print()
 
     report = EvalReport()
     case_num = 0
@@ -357,7 +387,7 @@ async def run_evaluation(csv_path: str, output_path: str | None = None) -> EvalR
             print(f"[{case_num}/{total}] Sending: {case.prompt[:80]}...", flush=True)
             try:
                 actual = await collect_response(client, case, timeout)
-                passed = case.check(actual)
+                passed = case.check(actual, settings)
                 report.results.append(EvalResult(case=case, actual_response=actual, passed=passed))
                 status = "PASS" if passed else "FAIL"
                 print(f"  -> [{status}]")
@@ -387,11 +417,13 @@ def main():
     if len(sys.argv) < 2:
         print("Usage: python evaluate.py <input.csv> [output.csv]")
         print("\nCSV columns: prompt, expected_response, match_method[, conversation_id][, attachment][, skip]")
-        print("Match methods: exact, contains, not_contains, regex, fuzzy, partial")
+        print("Match methods (deterministic): exact, contains, not_contains, regex, fuzzy, partial")
+        print("Match methods (LLM judge):     general_quality, text_similarity, compare_meaning")
         print("\nRows with the same conversation_id share one conversation (multi-turn).")
         print("Rows without a conversation_id each get a fresh conversation.")
         print("Attachment: URL or local file path (optional). Local files are base64-encoded.")
         print("Skip: set to true/yes/1 to skip a row without removing it from the CSV.")
+        print("LLM judge methods require JUDGE_* env vars (see README).")
         sys.exit(1)
 
     csv_path = sys.argv[1]
