@@ -189,6 +189,169 @@ class EvalReport:
                 ])
         print(f"\nResults saved to {path}")
 
+    def save_html(self, path: Path) -> None:
+        """Write a self-contained HTML report."""
+        import html as _html
+        path.parent.mkdir(parents=True, exist_ok=True)
+
+        rows_html = []
+        for i, r in enumerate(self.results, 1):
+            status = "PASS" if r.passed else "FAIL"
+            row_class = "pass" if r.passed else "fail"
+            error_html = ""
+            if r.error:
+                error_html = f'<div class="error">⚠ {_html.escape(r.error)}</div>'
+            rows_html.append(f"""
+            <tr class="row {row_class}">
+                <td class="num">{i}</td>
+                <td class="status"><span class="badge {row_class}">{status}</span></td>
+                <td class="method">{_html.escape(r.case.match_method)}</td>
+                <td class="prompt"><div class="cell-content">{_html.escape(r.case.prompt)}</div></td>
+                <td class="expected"><div class="cell-content">{_html.escape(r.case.expected_response)}</div></td>
+                <td class="actual"><div class="cell-content">{_html.escape(r.actual_response)}</div>{error_html}</td>
+                <td class="conv">{_html.escape(r.case.conversation_id or "—")}</td>
+            </tr>""")
+
+        pass_pct = (self.passed / self.total * 100) if self.total else 0
+        ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+        html_doc = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Eval Report — {ts}</title>
+<style>
+* {{ box-sizing: border-box; }}
+body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+       margin: 0; padding: 24px; background: #f6f8fa; color: #24292f; }}
+h1 {{ margin: 0 0 4px 0; font-size: 22px; }}
+.meta {{ color: #57606a; font-size: 13px; margin-bottom: 16px; }}
+.summary {{ display: flex; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; }}
+.card {{ background: white; border: 1px solid #d0d7de; border-radius: 6px;
+         padding: 12px 16px; min-width: 100px; }}
+.card .label {{ font-size: 11px; text-transform: uppercase; color: #57606a; letter-spacing: 0.5px; }}
+.card .value {{ font-size: 24px; font-weight: 600; margin-top: 2px; }}
+.card.pass .value {{ color: #1a7f37; }}
+.card.fail .value {{ color: #cf222e; }}
+.card.rate .value {{ color: #0969da; }}
+table {{ width: 100%; border-collapse: collapse; background: white;
+         border: 1px solid #d0d7de; border-radius: 6px; overflow: hidden;
+         font-size: 13px; }}
+thead {{ background: #f6f8fa; }}
+th {{ text-align: left; padding: 10px 12px; font-weight: 600;
+      border-bottom: 1px solid #d0d7de; cursor: pointer; user-select: none; }}
+th:hover {{ background: #eaeef2; }}
+th.sorted-asc::after {{ content: " ▲"; color: #57606a; }}
+th.sorted-desc::after {{ content: " ▼"; color: #57606a; }}
+td {{ padding: 10px 12px; vertical-align: top; border-bottom: 1px solid #eaeef2; }}
+tr:last-child td {{ border-bottom: none; }}
+tr.pass {{ background: #f6fff8; }}
+tr.fail {{ background: #fff8f8; }}
+.cell-content {{ max-width: 360px; max-height: 120px; overflow: auto; white-space: pre-wrap;
+                 word-wrap: break-word; font-family: ui-monospace, "Cascadia Code", monospace;
+                 font-size: 12px; line-height: 1.45; }}
+.badge {{ display: inline-block; padding: 2px 8px; border-radius: 12px;
+          font-size: 11px; font-weight: 600; letter-spacing: 0.3px; }}
+.badge.pass {{ background: #dafbe1; color: #1a7f37; }}
+.badge.fail {{ background: #ffebe9; color: #cf222e; }}
+.num {{ color: #57606a; width: 40px; }}
+.status {{ width: 70px; }}
+.method {{ width: 130px; font-family: ui-monospace, monospace; font-size: 12px; color: #6639ba; }}
+.conv {{ font-family: ui-monospace, monospace; font-size: 12px; color: #57606a; }}
+.error {{ margin-top: 6px; padding: 6px 8px; background: #ffebe9; color: #cf222e;
+          border-radius: 4px; font-size: 12px; }}
+.filter {{ margin-bottom: 12px; }}
+.filter input {{ padding: 6px 10px; border: 1px solid #d0d7de; border-radius: 6px;
+                 font-size: 13px; min-width: 240px; }}
+.filter button {{ margin-left: 8px; padding: 6px 12px; border: 1px solid #d0d7de;
+                  border-radius: 6px; background: white; cursor: pointer; font-size: 13px; }}
+.filter button.active {{ background: #0969da; color: white; border-color: #0969da; }}
+</style>
+</head>
+<body>
+<h1>Evaluation Report</h1>
+<div class="meta">{ts}</div>
+
+<div class="summary">
+    <div class="card"><div class="label">Total</div><div class="value">{self.total}</div></div>
+    <div class="card pass"><div class="label">Passed</div><div class="value">{self.passed}</div></div>
+    <div class="card fail"><div class="label">Failed</div><div class="value">{self.failed}</div></div>
+    <div class="card rate"><div class="label">Pass rate</div><div class="value">{pass_pct:.0f}%</div></div>
+</div>
+
+<div class="filter">
+    <input type="text" id="search" placeholder="Filter prompts/responses…">
+    <button id="all" class="active">All</button>
+    <button id="pass-only">Pass</button>
+    <button id="fail-only">Fail</button>
+</div>
+
+<table id="results">
+    <thead>
+        <tr>
+            <th>#</th>
+            <th>Status</th>
+            <th>Method</th>
+            <th>Prompt</th>
+            <th>Expected</th>
+            <th>Actual</th>
+            <th>Conv ID</th>
+        </tr>
+    </thead>
+    <tbody>{''.join(rows_html)}</tbody>
+</table>
+
+<script>
+const rows = Array.from(document.querySelectorAll('#results tbody tr'));
+const search = document.getElementById('search');
+const btnAll = document.getElementById('all');
+const btnPass = document.getElementById('pass-only');
+const btnFail = document.getElementById('fail-only');
+let mode = 'all';
+
+function applyFilter() {{
+    const q = search.value.toLowerCase();
+    rows.forEach(r => {{
+        const text = r.textContent.toLowerCase();
+        const matchText = !q || text.includes(q);
+        const matchMode = mode === 'all'
+            || (mode === 'pass' && r.classList.contains('pass'))
+            || (mode === 'fail' && r.classList.contains('fail'));
+        r.style.display = (matchText && matchMode) ? '' : 'none';
+    }});
+}}
+search.addEventListener('input', applyFilter);
+[btnAll, btnPass, btnFail].forEach(b => b.addEventListener('click', () => {{
+    [btnAll, btnPass, btnFail].forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    mode = b.id === 'pass-only' ? 'pass' : b.id === 'fail-only' ? 'fail' : 'all';
+    applyFilter();
+}}));
+
+// Click-to-sort columns
+document.querySelectorAll('#results th').forEach((th, idx) => {{
+    th.addEventListener('click', () => {{
+        const tbody = document.querySelector('#results tbody');
+        const allRows = Array.from(tbody.querySelectorAll('tr'));
+        const asc = !th.classList.contains('sorted-asc');
+        document.querySelectorAll('#results th').forEach(x => x.classList.remove('sorted-asc', 'sorted-desc'));
+        th.classList.add(asc ? 'sorted-asc' : 'sorted-desc');
+        allRows.sort((a, b) => {{
+            const av = a.children[idx].textContent.trim();
+            const bv = b.children[idx].textContent.trim();
+            const an = parseFloat(av), bn = parseFloat(bv);
+            if (!isNaN(an) && !isNaN(bn)) return asc ? an - bn : bn - an;
+            return asc ? av.localeCompare(bv) : bv.localeCompare(av);
+        }});
+        allRows.forEach(r => tbody.appendChild(r));
+    }});
+}});
+</script>
+</body>
+</html>"""
+        path.write_text(html_doc, encoding="utf-8")
+        print(f"HTML report saved to {path}")
+
 
 def load_cases(csv_path: str) -> tuple[list[EvalCase], int]:
     """Load eval cases from CSV, returning (cases, skipped_count)."""
@@ -354,7 +517,63 @@ async def start_new_conversation(conn: ConnectionSettings, token: str, conv_labe
     return client
 
 
-async def run_evaluation(csv_path: str, output_path: str | None = None) -> EvalReport:
+async def _run_group(
+    conv_id: str,
+    group: list[EvalCase],
+    conn: ConnectionSettings,
+    token: str,
+    timeout: int,
+    settings: AgentSettings,
+    semaphore: asyncio.Semaphore,
+) -> list[EvalResult]:
+    """Run all cases in one conversation group sequentially.
+
+    Multi-turn ordering must be preserved within a group. The semaphore
+    limits how many groups run in parallel.
+    """
+    results: list[EvalResult] = []
+    async with semaphore:
+        label = conv_id if not conv_id.startswith("_solo_") else ""
+        try:
+            client = await start_new_conversation(conn, token, label, timeout)
+        except Exception as e:
+            # If we can't even start the conversation, mark all cases in the group as failed
+            for case in group:
+                results.append(EvalResult(
+                    case=case, actual_response="", passed=False,
+                    error=f"Failed to start conversation: {e}",
+                ))
+            return results
+
+        for case in group:
+            print(f"[{conv_id[:20] if not conv_id.startswith('_solo_') else 'solo'}] "
+                  f"Sending: {case.prompt[:60]}...", flush=True)
+            try:
+                actual = await collect_response(client, case, timeout)
+                passed = case.check(actual, settings)
+                results.append(EvalResult(case=case, actual_response=actual, passed=passed))
+                status = "PASS" if passed else "FAIL"
+                print(f"  -> [{status}] {case.prompt[:60]}")
+            except TimeoutError:
+                results.append(EvalResult(
+                    case=case, actual_response="", passed=False,
+                    error=f"Timed out after {timeout}s",
+                ))
+                print(f"  -> [TIMEOUT] {case.prompt[:60]}")
+            except Exception as e:
+                results.append(EvalResult(
+                    case=case, actual_response="", passed=False, error=str(e)
+                ))
+                print(f"  -> [ERROR] {e}")
+    return results
+
+
+async def run_evaluation(
+    csv_path: str,
+    output_path: str | None = None,
+    concurrency: int = 1,
+    open_html: bool = True,
+) -> EvalReport:
     settings = AgentSettings.from_env()
     conn = ConnectionSettings(
         environment_id=settings.environment_id,
@@ -368,67 +587,92 @@ async def run_evaluation(csv_path: str, output_path: str | None = None) -> EvalR
     total = len(cases)
     multi_turn_groups = sum(1 for g in groups.values() if len(g) > 1)
     solo_count = sum(1 for g in groups.values() if len(g) == 1)
+    concurrency = max(1, min(concurrency, len(groups)))
     print(f"Loaded {total} evaluation cases from {csv_path}" +
           (f" ({skipped} skipped)" if skipped else ""))
     print(f"  {solo_count} independent prompt(s), {multi_turn_groups} multi-turn conversation(s)")
+    print(f"  Concurrency: {concurrency} (groups in parallel)")
     print(f"  Timeout: {timeout}s per call")
     if settings.has_judge_config:
         print(f"  LLM judge: {settings.judge_provider} ({settings.judge_model})")
     print()
 
-    report = EvalReport()
-    case_num = 0
-    for conv_id, group in groups.items():
-        label = conv_id if not conv_id.startswith("_solo_") else ""
-        client = await start_new_conversation(conn, token, label, timeout)
+    semaphore = asyncio.Semaphore(concurrency)
+    tasks = [
+        _run_group(conv_id, group, conn, token, timeout, settings, semaphore)
+        for conv_id, group in groups.items()
+    ]
+    group_results = await asyncio.gather(*tasks)
 
-        for case in group:
-            case_num += 1
-            print(f"[{case_num}/{total}] Sending: {case.prompt[:80]}...", flush=True)
-            try:
-                actual = await collect_response(client, case, timeout)
-                passed = case.check(actual, settings)
-                report.results.append(EvalResult(case=case, actual_response=actual, passed=passed))
-                status = "PASS" if passed else "FAIL"
-                print(f"  -> [{status}]")
-            except TimeoutError:
-                report.results.append(EvalResult(
-                    case=case, actual_response="", passed=False,
-                    error=f"Timed out after {timeout}s",
-                ))
-                print(f"  -> [TIMEOUT] No response within {timeout}s")
-            except Exception as e:
-                report.results.append(EvalResult(
-                    case=case, actual_response="", passed=False, error=str(e)
-                ))
-                print(f"  -> [ERROR] {e}")
+    # Flatten results in original CSV order using a case identity map
+    report = EvalReport()
+    case_to_result = {id(r.case): r for results in group_results for r in results}
+    for case in cases:
+        result = case_to_result.get(id(case))
+        if result is not None:
+            report.results.append(result)
 
     report.print_summary()
 
     if output_path is None:
         ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_path = f"results/eval_{ts}.csv"
-    report.save_csv(Path(output_path))
+        csv_out = f"results/eval_{ts}.csv"
+        html_out = f"results/eval_{ts}.html"
+    else:
+        out_path = Path(output_path)
+        if out_path.suffix.lower() == ".html":
+            html_out = output_path
+            csv_out = str(out_path.with_suffix(".csv"))
+        else:
+            csv_out = output_path
+            html_out = str(out_path.with_suffix(".html"))
+
+    report.save_csv(Path(csv_out))
+    report.save_html(Path(html_out))
+
+    if open_html:
+        try:
+            import webbrowser
+            webbrowser.open(Path(html_out).resolve().as_uri())
+        except Exception:
+            pass
 
     return report
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("Usage: python evaluate.py <input.csv> [output.csv]")
-        print("\nCSV columns: prompt, expected_response, match_method[, conversation_id][, attachment][, skip]")
-        print("Match methods (deterministic): exact, contains, not_contains, regex, fuzzy, partial")
-        print("Match methods (LLM judge):     general_quality, text_similarity, compare_meaning")
-        print("\nRows with the same conversation_id share one conversation (multi-turn).")
-        print("Rows without a conversation_id each get a fresh conversation.")
-        print("Attachment: URL or local file path (optional). Local files are base64-encoded.")
-        print("Skip: set to true/yes/1 to skip a row without removing it from the CSV.")
-        print("LLM judge methods require JUDGE_* env vars (see README).")
-        sys.exit(1)
+    import argparse
+    parser = argparse.ArgumentParser(
+        description="Run prompt evaluations against a Copilot Studio agent.",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+CSV columns: prompt, expected_response, match_method[, conversation_id][, attachment][, skip]
 
-    csv_path = sys.argv[1]
-    output_path = sys.argv[2] if len(sys.argv) > 2 else None
-    asyncio.run(run_evaluation(csv_path, output_path))
+Match methods (deterministic): exact, contains, not_contains, regex, fuzzy, partial
+Match methods (LLM judge):     general_quality, text_similarity, compare_meaning
+
+Rows with the same conversation_id share one conversation (multi-turn).
+Rows without a conversation_id each get a fresh conversation.
+Attachment: URL or local file path (optional). Local files are base64-encoded.
+Skip: set to true/yes/1 to skip a row without removing it from the CSV.
+LLM judge methods require JUDGE_* env vars (see README).
+""",
+    )
+    parser.add_argument("input_csv", help="Path to the evaluation CSV file")
+    parser.add_argument("output", nargs="?", default=None,
+                        help="Output path (.csv or .html). Both are written; default: results/eval_<timestamp>.csv")
+    parser.add_argument("--concurrency", "-c", type=int, default=1,
+                        help="Number of conversation groups to run in parallel (default: 1)")
+    parser.add_argument("--no-open", action="store_true",
+                        help="Do not auto-open the HTML report in a browser")
+    args = parser.parse_args()
+
+    asyncio.run(run_evaluation(
+        csv_path=args.input_csv,
+        output_path=args.output,
+        concurrency=args.concurrency,
+        open_html=not args.no_open,
+    ))
 
 
 if __name__ == "__main__":

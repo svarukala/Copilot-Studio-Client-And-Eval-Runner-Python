@@ -57,9 +57,17 @@ A browser window will open for authentication on first run. The token is cached 
 Run a batch of prompts against the agent and get a pass/fail report:
 
 ```bash
-python evaluate.py sample_eval.csv                  # results auto-saved to results/eval_<timestamp>.csv
-python evaluate.py input.csv results/output.csv     # explicit output path
+python evaluate.py sample_eval.csv                       # default: 1 conversation at a time
+python evaluate.py sample_eval.csv -c 5                  # run 5 conversation groups in parallel
+python evaluate.py sample_eval.csv results/out.html      # explicit output path (.html or .csv)
+python evaluate.py sample_eval.csv --no-open             # don't auto-open the HTML report
 ```
+
+Two reports are written for every run:
+- **CSV** — `results/eval_<timestamp>.csv` for downstream processing
+- **HTML** — `results/eval_<timestamp>.html` with sortable rows, search/filter, status badges, and aggregate stats. Auto-opens in your browser unless `--no-open` is set.
+
+**Concurrency:** Use `--concurrency N` (or `-c N`) to run N conversation groups in parallel. Multi-turn rows that share a `conversation_id` always run sequentially within their group, so ordering is preserved. Default is 1 (no parallelism). Useful values are 3-10 depending on your tenant's rate limits.
 
 ## Evaluation CSV Format
 

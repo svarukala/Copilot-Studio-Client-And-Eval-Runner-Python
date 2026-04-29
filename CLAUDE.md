@@ -24,7 +24,7 @@ python evaluate.py input.csv output.csv         # explicit output path
 
 - **config.py** - `AgentSettings` dataclass loaded from `.env`; supports both interactive (browser) and S2S (client credentials) auth modes via `AUTH_MODE`
 - **chat.py** - Interactive console chat loop. Authenticates via MSAL, creates a `CopilotClient` (from `microsoft-agents-copilotstudio-client`), calls `start_conversation()` then `ask_question()` in a loop. The `acquire_token()` and `create_copilot_client()` functions are reused by `evaluate.py`. Also exports consent card handling (`is_consent_card()`, `handle_consent_card()`) used by both chat and eval flows.
-- **evaluate.py** - Reads a CSV of `(prompt, expected_response, match_method)`, runs each prompt against the agent in its own conversation, checks the response, and outputs a pass/fail report + results CSV. Auto-approves connector consent cards.
+- **evaluate.py** - Reads a CSV of `(prompt, expected_response, match_method)`, runs each prompt against the agent in its own conversation, checks the response, and outputs a pass/fail report + results CSV/HTML. Auto-approves connector consent cards. Supports parallel execution of conversation groups via `--concurrency N`.
 - **judge.py** - LLM-as-a-Judge support. Provides `judge_general_quality()`, `judge_text_similarity()`, `judge_compare_meaning()` functions that call a configurable LLM (Azure OpenAI, OpenAI, Ollama, or any OpenAI-compatible endpoint) and return a 0-100 score plus reasoning. All providers use the `openai` SDK with a configurable `base_url`.
 
 ## Key SDK Details
